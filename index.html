@@ -1,0 +1,983 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Teachers' Mate (담임ver.)</title>
+    
+    <!-- 어플리케이션 설치(PWA) 및 아이콘 설정 -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#10b981">
+    <link rel="icon" type="image/png" href="icon-512.png">
+    <link rel="apple-touch-icon" href="icon-512.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="TeachersMate">
+    
+    <!-- 라이브러리 로드 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@0.474.0/dist/umd/lucide.min.js"></script>
+    
+    <style>
+        @font-face {
+          font-family: 'NanumSquareRound';
+          src: url('https://fastly.jsdelivr.net/gh/projectnoonnu/noonfonts_two@1.0/NanumSquareRound.woff') format('woff');
+          font-weight: normal;
+          font-style: normal;
+        }
+        body { 
+            font-family: 'NanumSquareRound', -apple-system, sans-serif; 
+            background-color: #fdfbf7; 
+            color: #292524;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        select {
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+        }
+        input, button, select, textarea { font-size: 16px !important; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+
+        // 아이콘 렌더링을 위한 Wrapper 컴포넌트
+        const Icon = ({ name, size = 20, className = "", strokeWidth = 2 }) => {
+            const iconRef = useRef(null);
+            useEffect(() => {
+                if (iconRef.current && window.lucide) {
+                    iconRef.current.innerHTML = '';
+                    const i = document.createElement('i');
+                    i.setAttribute('data-lucide', name);
+                    iconRef.current.appendChild(i);
+                    window.lucide.createIcons({
+                        root: iconRef.current,
+                        attrs: {
+                            width: size,
+                            height: size,
+                            'stroke-width': strokeWidth
+                        }
+                    });
+                }
+            }, [name, size, strokeWidth]);
+            return <span ref={iconRef} className={`inline-flex items-center justify-center ${className}`}></span>;
+        };
+
+        const INITIAL_HOLIDAYS = {
+          '2026-01-01': '신정', '2026-02-16': '설날 연휴', '2026-02-17': '설날', '2026-02-18': '설날 연휴',
+          '2026-03-01': '삼일절', '2026-03-02': '대체공휴일', '2026-05-05': '어린이날',
+          '2026-05-24': '부처님오신날', '2026-05-25': '대체공휴일', '2026-06-03': '지방선거일', '2026-06-06': '현충일',
+          '2026-08-15': '광복절', '2026-09-24': '추석 연휴', '2026-09-25': '추석', '2026-09-26': '추석 연휴',
+          '2026-10-03': '개천절', '2026-10-09': '한글날', '2026-12-25': '기독탄신일',
+          '2027-01-01': '신정', '2027-02-06': '설날 연휴', '2027-02-07': '설날', '2027-02-08': '설날 연휴', '2027-02-09': '대체공휴일',
+          '2027-03-01': '삼일절', '2027-05-05': '어린이날', '2027-05-13': '부처님오신날', '2027-06-06': '현충일',
+          '2027-08-15': '광복절', '2027-09-14': '추석 연휴', '2027-09-15': '추석', '2027-09-16': '추석 연휴',
+          '2027-10-03': '개천절', '2027-10-09': '한글날', '2027-12-25': '기독탄신일'
+        };
+
+        const ATTENDANCE_SUB_TYPES = ['질병', '감염병', '경조사', '생리', '기타', '미인정', '장기'];
+
+        const getFormatDate = (date) => {
+          const y = date.getFullYear();
+          const m = String(date.getMonth() + 1).padStart(2, '0');
+          const d = String(date.getDate()).padStart(2, '0');
+          return `${y}-${m}-${d}`;
+        };
+
+        const exportToCSV = (filename, headers, data) => {
+          const BOM = "\uFEFF"; 
+          const formatCell = (val) => {
+            if (val === null || val === undefined) return '""';
+            const str = String(val);
+            return `"${str.replace(/"/g, '""')}"`;
+          };
+          const csvContent = BOM + [
+            headers.map(formatCell).join(','),
+            ...data.map(row => row.map(formatCell).join(','))
+          ].join('\n');
+
+          const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(blob);
+          link.download = filename;
+          link.click();
+        };
+
+        function App() {
+          const [activeTab, setActiveTab] = useState('calendar');
+          const [currentDate, setCurrentDate] = useState(new Date());
+          const [selectedDate, setSelectedDate] = useState(null); 
+
+          const [students, setStudents] = useState([
+            { id: 's1', number: 1, name: '김학생' },
+            { id: 's2', number: 2, name: '이학생' },
+          ]);
+          const [attendance, setAttendance] = useState({});
+          const [counseling, setCounseling] = useState([]);
+          const [todos, setTodos] = useState({});
+          const [memos, setMemos] = useState({});
+          
+          const [holidays, setHolidays] = useState(INITIAL_HOLIDAYS);
+          const [customEvents, setCustomEvents] = useState({});
+          const [isEventModalOpen, setIsEventModalOpen] = useState(false);
+          
+          const [timetable, setTimetable] = useState({
+            1: Array(8).fill(''), 2: Array(8).fill(''), 3: Array(8).fill(''), 4: Array(8).fill(''), 5: Array(8).fill('')
+          });
+          const [evaluations, setEvaluations] = useState([]);
+          const [selectedStudentForModal, setSelectedStudentForModal] = useState(null);
+
+          const firstDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+          const lastDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+          const startDayIndex = firstDayOfMonth.getDay();
+          const daysInMonth = lastDayOfMonth.getDate();
+
+          const prevMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
+          const nextMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
+
+          const renderCalendar = () => {
+            const days = [];
+            const todayStr = getFormatDate(new Date());
+
+            for (let i = 0; i < startDayIndex; i++) {
+              days.push(<div key={`empty-${i}`} className="h-24 bg-stone-50/50 border border-stone-100 rounded-2xl"></div>);
+            }
+            
+            for (let d = 1; d <= daysInMonth; d++) {
+              const dateObj = new Date(currentDate.getFullYear(), currentDate.getMonth(), d);
+              const dateStr = getFormatDate(dateObj);
+              const dayOfWeek = dateObj.getDay();
+              const holiday = holidays[dateStr];
+              const customEvent = customEvents[dateStr];
+              
+              const hasTodo = todos[dateStr]?.some(t => !t.done);
+              const hasMemo = memos[dateStr]?.trim().length > 0;
+              const hasAttendance = attendance[dateStr]?.length > 0;
+              const hasCounseling = counseling.some(c => c.date === dateStr);
+              const isToday = dateStr === todayStr;
+
+              days.push(
+                <div 
+                  key={d} 
+                  onClick={() => setSelectedDate(dateStr)}
+                  className={`h-28 border rounded-2xl p-3 cursor-pointer transition-all hover:border-emerald-400 hover:shadow-md flex flex-col justify-between
+                    ${isToday ? 'bg-emerald-50/80 border-emerald-400 shadow-sm' : 
+                      (dayOfWeek === 0 || holiday) ? 'bg-rose-50/40 border-stone-100' : 
+                      dayOfWeek === 6 ? 'bg-sky-50/40 border-stone-100' : 
+                      'bg-white border-stone-100'}`}
+                >
+                  <div>
+                    <div className="flex justify-between items-start">
+                      <span className={`font-bold ${isToday ? 'text-emerald-600' : dayOfWeek === 0 || holiday ? 'text-rose-400' : dayOfWeek === 6 ? 'text-sky-400' : 'text-stone-600'}`}>
+                        {d}
+                      </span>
+                      <div className="flex gap-1.5">
+                        {hasTodo && <span className="w-2 h-2 rounded-full bg-emerald-400" title="할 일" />}
+                        {hasMemo && <span className="w-2 h-2 rounded-full bg-amber-400" title="메모" />}
+                        {hasAttendance && <span className="w-2 h-2 rounded-full bg-rose-400" title="출결 기록" />}
+                        {hasCounseling && <span className="w-2 h-2 rounded-full bg-sky-400" title="상담" />}
+                      </div>
+                    </div>
+                    {(holiday || customEvent) && (
+                      <div className="mt-1.5 flex flex-col gap-1">
+                        {holiday && <span className="text-[11px] px-1.5 py-0.5 bg-rose-100/80 text-rose-600 rounded-md truncate font-semibold">{holiday}</span>}
+                        {customEvent && <span className="text-[11px] px-1.5 py-0.5 bg-emerald-100/80 text-emerald-700 rounded-md truncate font-semibold">{customEvent}</span>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            }
+            return days;
+          };
+
+          const studentStats = useMemo(() => {
+            const stats = {};
+            students.forEach(s => { stats[s.id] = { absent: 0, early: 0, late: 0, missed: 0, field: 0 }; });
+            
+            Object.values(attendance).forEach(dayRecords => {
+              dayRecords.forEach(record => {
+                if (stats[record.studentId]) {
+                  if (record.type === '결석') stats[record.studentId].absent++;
+                  if (record.type === '조퇴') stats[record.studentId].early++;
+                  if (record.type === '지각') stats[record.studentId].late++;
+                  if (record.type === '결과') stats[record.studentId].missed++;
+                  if (record.type === '교외체험') stats[record.studentId].field++;
+                }
+              });
+            });
+            return stats;
+          }, [students, attendance]);
+
+          const renderRoster = () => {
+            const handleExport = () => {
+              const headers = ['번호', '이름', '결석', '조퇴', '지각', '결과', '교외체험'];
+              const data = students.map(s => [
+                s.number, s.name, 
+                studentStats[s.id].absent, studentStats[s.id].early, studentStats[s.id].late, studentStats[s.id].missed, studentStats[s.id].field
+              ]);
+              exportToCSV('학급명렬표.csv', headers, data);
+            };
+
+            const addStudent = () => {
+              const newId = `s${Date.now()}`;
+              setStudents([...students, { id: newId, number: students.length + 1, name: '' }]);
+            };
+
+            const updateStudent = (id, field, value) => {
+              setStudents(students.map(s => s.id === id ? { ...s, [field]: value } : s));
+            };
+
+            const removeStudent = (id) => {
+              if(window.confirm('학생을 삭제하시겠습니까? 관련 출결 기록은 유지되나 명단에서 보이지 않습니다.')) {
+                setStudents(students.filter(s => s.id !== id));
+              }
+            };
+
+            return (
+              <div className="p-6 bg-white rounded-3xl shadow-sm border border-stone-100">
+                <div className="flex justify-between items-start mb-6">
+                  <h2 className="text-xl font-bold text-stone-700 flex items-center mt-1"><Icon name="users" size={24} className="mr-2 text-emerald-500"/> 학급명렬표 및 출결 통계</h2>
+                  <div className="flex flex-col gap-2">
+                    <button onClick={handleExport} className="px-4 py-2 bg-stone-100 text-stone-600 rounded-xl hover:bg-stone-200 font-bold transition-colors text-sm flex items-center justify-center">
+                      <Icon name="download" size={16} className="mr-1" /> 엑셀(CSV) 다운로드
+                    </button>
+                    <button onClick={addStudent} className="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl hover:bg-emerald-100 font-bold transition-colors text-sm text-center">
+                      학생 추가
+                    </button>
+                  </div>
+                </div>
+                
+                <p className="text-sm text-stone-400 mb-4">* 학생 행을 클릭하면 상세 출결 기록을 볼 수 있습니다.</p>
+
+                <div className="overflow-x-auto rounded-2xl border border-stone-100">
+                  <table className="w-full text-left border-collapse min-w-[800px]">
+                    <thead>
+                      <tr className="bg-stone-50 border-b border-stone-100 text-stone-500 text-sm">
+                        <th className="p-4 w-16 text-center font-bold">번호</th>
+                        <th className="p-4 font-bold">이름</th>
+                        <th className="p-4 w-20 text-center text-rose-500 font-bold">결석</th>
+                        <th className="p-4 w-20 text-center text-amber-500 font-bold">조퇴</th>
+                        <th className="p-4 w-20 text-center text-indigo-500 font-bold">지각</th>
+                        <th className="p-4 w-20 text-center text-violet-500 font-bold">결과</th>
+                        <th className="p-4 w-24 text-center text-sky-500 font-bold">교외체험</th>
+                        <th className="p-4 w-24 text-center font-bold">관리</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {students.sort((a,b)=>a.number - b.number).map(student => (
+                        <tr 
+                          key={student.id} 
+                          onClick={() => setSelectedStudentForModal(student.id)} 
+                          className="border-b border-stone-50 hover:bg-stone-50/50 transition-colors cursor-pointer"
+                        >
+                          <td className="p-2 text-center" onClick={e => e.stopPropagation()}>
+                            <input 
+                              type="number" 
+                              value={student.number} 
+                              onChange={(e) => updateStudent(student.id, 'number', Number(e.target.value))}
+                              className="w-12 text-center bg-transparent border-b-2 border-transparent hover:border-stone-300 focus:border-emerald-400 focus:outline-none transition-colors"
+                            />
+                          </td>
+                          <td className="p-2" onClick={e => e.stopPropagation()}>
+                            <input 
+                              type="text" 
+                              value={student.name} 
+                              placeholder="이름 입력"
+                              onChange={(e) => updateStudent(student.id, 'name', e.target.value)}
+                              className="w-full bg-transparent border-b-2 border-transparent hover:border-stone-300 focus:border-emerald-400 focus:outline-none px-2 py-1 transition-colors"
+                            />
+                          </td>
+                          <td className="p-4 text-center bg-rose-50/30 font-bold text-rose-600">{studentStats[student.id]?.absent || 0}</td>
+                          <td className="p-4 text-center bg-amber-50/30 font-bold text-amber-600">{studentStats[student.id]?.early || 0}</td>
+                          <td className="p-4 text-center bg-indigo-50/30 font-bold text-indigo-600">{studentStats[student.id]?.late || 0}</td>
+                          <td className="p-4 text-center bg-violet-50/30 font-bold text-violet-600">{studentStats[student.id]?.missed || 0}</td>
+                          <td className="p-4 text-center bg-sky-50/30 font-bold text-sky-600">{studentStats[student.id]?.field || 0}</td>
+                          <td className="p-4 text-center space-x-3" onClick={e => e.stopPropagation()}>
+                            <button onClick={() => setSelectedStudentForModal(student.id)} className="text-stone-300 hover:text-emerald-500 transition-colors" title="출결 상세 기록">
+                              <Icon name="search" size={18} />
+                            </button>
+                            <button onClick={() => removeStudent(student.id)} className="text-stone-300 hover:text-rose-400 transition-colors" title="학생 삭제">
+                              <Icon name="trash-2" size={18} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {students.length === 0 && (
+                        <tr><td colSpan="8" className="text-center p-10 text-stone-400 font-medium">학생을 추가해주세요.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          };
+
+          const renderCounseling = () => {
+            const handleExport = () => {
+              const headers = ['일시', '학생명', '상담내용'];
+              const data = counseling.map(c => {
+                const student = students.find(s => s.id === c.studentId);
+                return [c.date, student ? student.name : '알수없음', c.content];
+              });
+              exportToCSV('상담일지.csv', headers, data);
+            };
+
+            const deleteCounseling = (id) => {
+              if(window.confirm('기록을 삭제하시겠습니까?')) {
+                setCounseling(counseling.filter(c => c.id !== id));
+              }
+            };
+
+            const sortedCounseling = [...counseling].sort((a,b) => new Date(b.date) - new Date(a.date));
+
+            return (
+              <div className="p-6 bg-white rounded-3xl shadow-sm border border-stone-100">
+                <div className="flex justify-between items-center mb-6">
+                  <h2 className="text-xl font-bold text-stone-700 flex items-center"><Icon name="book-open" size={24} className="mr-2 text-emerald-500"/> 학생 상담 일지</h2>
+                  <button onClick={handleExport} className="px-4 py-2 bg-stone-100 text-stone-600 rounded-xl hover:bg-stone-200 font-bold transition-colors text-sm flex items-center">
+                    <Icon name="download" size={16} className="mr-1" /> 엑셀(CSV) 다운로드
+                  </button>
+                </div>
+
+                <div className="grid gap-4">
+                  {sortedCounseling.length === 0 ? (
+                    <div className="text-center p-12 text-stone-400 border border-dashed border-stone-200 rounded-2xl bg-stone-50/50 font-medium">달력의 각 날짜 칸을 클릭하여 상담 내용을 입력할 수 있습니다.</div>
+                  ) : (
+                    sortedCounseling.map(record => {
+                      const student = students.find(s => s.id === record.studentId);
+                      return (
+                        <div key={record.id} className="border border-stone-100 p-5 rounded-2xl hover:shadow-md transition-shadow bg-white">
+                          <div className="flex justify-between items-center mb-3">
+                            <div className="flex items-center gap-3">
+                              <span className="bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg text-sm font-bold">{record.date}</span>
+                              <span className="font-extrabold text-lg text-stone-700">{student ? student.name : '삭제된 학생'}</span>
+                            </div>
+                            <button onClick={() => deleteCounseling(record.id)} className="text-stone-300 hover:text-rose-400 transition-colors p-2"><Icon name="trash-2" size={18}/></button>
+                          </div>
+                          <p className="text-stone-600 whitespace-pre-wrap leading-relaxed">{record.content}</p>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            );
+          };
+
+          const renderTimetable = () => {
+            const days = ['월', '화', '수', '목', '금'];
+            const updateSubject = (dayIndex, periodIndex, val) => {
+              const newTable = { ...timetable };
+              newTable[dayIndex][periodIndex] = val;
+              setTimetable(newTable);
+            };
+
+            return (
+              <div className="p-6 bg-white rounded-3xl shadow-sm border border-stone-100">
+                <h2 className="text-xl font-bold text-stone-700 flex items-center mb-6"><Icon name="clock" size={24} className="mr-2 text-emerald-500"/> 기초시간표 설정</h2>
+                <div className="overflow-x-auto rounded-2xl border border-stone-100">
+                  <table className="w-full text-center border-collapse">
+                    <thead>
+                      <tr className="bg-stone-50 border-b border-stone-100">
+                        <th className="p-4 w-16 border-r border-stone-100 text-stone-500 font-bold">교시</th>
+                        {days.map(day => <th key={day} className="p-4 font-bold text-stone-600">{day}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Array(8).fill(0).map((_, periodIndex) => (
+                        <tr key={periodIndex} className="border-b border-stone-50">
+                          <td className="p-4 border-r border-stone-100 bg-stone-50/50 font-extrabold text-stone-400">{periodIndex + 1}</td>
+                          {[1, 2, 3, 4, 5].map(dayIndex => (
+                            <td key={dayIndex} className="p-2">
+                              <input 
+                                type="text" 
+                                value={timetable[dayIndex][periodIndex]} 
+                                onChange={(e) => updateSubject(dayIndex, periodIndex, e.target.value)}
+                                className="w-full text-center p-2.5 rounded-xl hover:bg-stone-50 focus:bg-emerald-50 focus:outline-none transition-colors font-medium text-stone-700"
+                                placeholder="-"
+                              />
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          };
+
+          const renderEvaluation = () => {
+            const addEval = () => {
+              setEvaluations([...evaluations, { id: Date.now(), semester: '1학기', subject: '', period: '', unit: '', content: '', method: '' }]);
+            };
+            
+            const updateEval = (id, field, val) => {
+              setEvaluations(evaluations.map(e => e.id === id ? { ...e, [field]: val } : e));
+            };
+
+            const deleteEval = (id) => setEvaluations(evaluations.filter(e => e.id !== id));
+
+            return (
+              <div className="p-6 bg-white rounded-3xl shadow-sm border border-stone-100">
+                <div className="flex justify-between items-center mb-6">
+                  <h2 className="text-xl font-bold text-stone-700 flex items-center"><Icon name="file-text" size={24} className="mr-2 text-emerald-500"/> 학기별 평가계획</h2>
+                  <button onClick={addEval} className="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl hover:bg-emerald-100 font-bold transition-colors text-sm">항목 추가</button>
+                </div>
+                
+                <div className="overflow-x-auto rounded-2xl border border-stone-100">
+                  <table className="w-full text-left border-collapse min-w-[800px]">
+                    <thead>
+                      <tr className="bg-stone-50 border-b border-stone-100 text-sm text-stone-500">
+                        <th className="p-4 w-28 font-bold">학기</th>
+                        <th className="p-4 w-32 font-bold">과목</th>
+                        <th className="p-4 w-32 font-bold">시기</th>
+                        <th className="p-4 w-40 font-bold">단원</th>
+                        <th className="p-4 font-bold">평가내용</th>
+                        <th className="p-4 w-40 font-bold">방식</th>
+                        <th className="p-4 w-16 text-center font-bold">삭제</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {evaluations.map(ev => (
+                        <tr key={ev.id} className="border-b border-stone-50 hover:bg-stone-50/50 transition-colors">
+                          <td className="p-2">
+                            <select value={ev.semester} onChange={(e) => updateEval(ev.id, 'semester', e.target.value)} className="w-full bg-transparent p-2 border-b-2 border-transparent focus:border-emerald-400 outline-none font-medium text-stone-600 rounded-lg">
+                              <option>1학기</option><option>2학기</option>
+                            </select>
+                          </td>
+                          <td className="p-2"><input type="text" value={ev.subject} onChange={(e) => updateEval(ev.id, 'subject', e.target.value)} className="w-full bg-transparent p-2 border-b-2 border-transparent focus:border-emerald-400 outline-none font-medium text-stone-600 rounded-lg" placeholder="국어"/></td>
+                          <td className="p-2"><input type="text" value={ev.period} onChange={(e) => updateEval(ev.id, 'period', e.target.value)} className="w-full bg-transparent p-2 border-b-2 border-transparent focus:border-emerald-400 outline-none font-medium text-stone-600 rounded-lg" placeholder="5월 2주"/></td>
+                          <td className="p-2"><input type="text" value={ev.unit} onChange={(e) => updateEval(ev.id, 'unit', e.target.value)} className="w-full bg-transparent p-2 border-b-2 border-transparent focus:border-emerald-400 outline-none font-medium text-stone-600 rounded-lg" placeholder="단원명"/></td>
+                          <td className="p-2"><input type="text" value={ev.content} onChange={(e) => updateEval(ev.id, 'content', e.target.value)} className="w-full bg-transparent p-2 border-b-2 border-transparent focus:border-emerald-400 outline-none font-medium text-stone-600 rounded-lg" placeholder="평가할 내용"/></td>
+                          <td className="p-2"><input type="text" value={ev.method} onChange={(e) => updateEval(ev.id, 'method', e.target.value)} className="w-full bg-transparent p-2 border-b-2 border-transparent focus:border-emerald-400 outline-none font-medium text-stone-600 rounded-lg" placeholder="지필/수행 등"/></td>
+                          <td className="p-2 text-center"><button onClick={() => deleteEval(ev.id)} className="p-2 text-stone-300 hover:text-rose-400 transition-colors rounded-lg"><Icon name="trash-2" size={18}/></button></td>
+                        </tr>
+                      ))}
+                      {evaluations.length === 0 && <tr><td colSpan="7" className="p-12 text-center text-stone-400 font-medium bg-stone-50/30">등록된 평가계획이 없습니다.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          };
+
+          const DailyModal = () => {
+            if (!selectedDate) return null;
+            
+            const dayOfWeek = new Date(selectedDate).getDay();
+            const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
+            
+            const [attStudent, setAttStudent] = useState(students[0]?.id || '');
+            const [attType, setAttType] = useState('결석');
+            const [attSubType, setAttSubType] = useState('질병');
+            const [attPeriod, setAttPeriod] = useState(''); 
+            const [attDocSubmitted, setAttDocSubmitted] = useState(false); 
+            
+            const [todoText, setTodoText] = useState('');
+            const [counselStudent, setCounselStudent] = useState(students[0]?.id || '');
+            const [counselText, setCounselText] = useState('');
+            const [memoText, setLocalMemoText] = useState(memos[selectedDate] || '');
+
+            const dayAttendance = attendance[selectedDate] || [];
+            const dayTodos = todos[selectedDate] || [];
+            const dayCounseling = counseling.filter(c => c.date === selectedDate);
+
+            const handleAddAttendance = () => {
+              if (!attStudent) return;
+              const needsSubType = ['결석', '조퇴', '지각', '결과'].includes(attType);
+              
+              const newRecord = { 
+                id: Date.now(), 
+                studentId: attStudent, 
+                type: attType,
+                subType: needsSubType ? attSubType : null,
+                period: attPeriod !== '' ? attPeriod : null,
+                docSubmitted: attDocSubmitted
+              };
+              
+              setAttendance(prev => ({ ...prev, [selectedDate]: [...(prev[selectedDate] || []), newRecord] }));
+              setAttDocSubmitted(false); 
+              setAttPeriod('');
+            };
+            
+            const handleDelAttendance = (id) => {
+              setAttendance(prev => ({ ...prev, [selectedDate]: prev[selectedDate].filter(r => r.id !== id) }));
+            };
+
+            const handleAddTodo = (e) => {
+              e.preventDefault();
+              if (!todoText.trim()) return;
+              const newTodo = { id: Date.now(), text: todoText, done: false };
+              setTodos(prev => ({ ...prev, [selectedDate]: [...(prev[selectedDate] || []), newTodo] }));
+              setTodoText('');
+            };
+            const toggleTodo = (id) => {
+              setTodos(prev => ({
+                ...prev, 
+                [selectedDate]: prev[selectedDate].map(t => t.id === id ? { ...t, done: !t.done } : t)
+              }));
+            };
+            const deleteTodo = (id) => setTodos(prev => ({ ...prev, [selectedDate]: prev[selectedDate].filter(t => t.id !== id) }));
+
+            const handleAddCounseling = () => {
+              if (!counselStudent || !counselText.trim()) return;
+              const newRecord = { id: Date.now(), date: selectedDate, studentId: counselStudent, content: counselText };
+              setCounseling(prev => [...prev, newRecord]);
+              setCounselText('');
+            };
+
+            const saveMemo = () => setMemos(prev => ({ ...prev, [selectedDate]: memoText }));
+
+            return (
+              <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <div className="bg-[#fdfbf7] rounded-3xl w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-2xl flex flex-col">
+                  <div className="sticky top-0 bg-[#fdfbf7] border-b border-stone-200 px-6 py-5 flex justify-between items-center z-10 rounded-t-3xl">
+                    <h3 className="text-2xl font-extrabold text-stone-700 flex items-center gap-2">
+                      {selectedDate} <span className="text-sm font-bold text-stone-400 bg-stone-100 px-3 py-1.5 rounded-xl">
+                        {['일','월','화','수','목','금','토'][dayOfWeek]}요일
+                      </span>
+                    </h3>
+                    <button onClick={() => { saveMemo(); setSelectedDate(null); }} className="p-2 hover:bg-stone-200 rounded-full transition-colors text-stone-500"><Icon name="x" size={24}/></button>
+                  </div>
+
+                  <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-6">
+                      <div className="bg-emerald-50/50 p-5 rounded-3xl border border-emerald-100/50">
+                        <h4 className="font-bold text-emerald-800 mb-4 flex items-center"><Icon name="clock" size={18} className="mr-2"/> 당일 시간표</h4>
+                        {isWeekday ? (
+                          <div className="grid grid-cols-4 gap-3">
+                            {timetable[dayOfWeek].map((subj, idx) => (
+                              <div key={idx} className="bg-white p-3 rounded-2xl shadow-sm text-center border border-stone-50 flex flex-col">
+                                <span className="text-[10px] font-bold text-stone-400 mb-1">{idx+1}교시</span>
+                                <span className="font-bold text-stone-600 truncate">{subj || '-'}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : <div className="text-sm text-stone-400 bg-white p-4 rounded-2xl text-center border border-stone-100 font-medium">주말은 시간표가 없습니다.</div>}
+                      </div>
+
+                      <div className="bg-emerald-50/30 p-5 rounded-3xl border border-emerald-100/30">
+                        <h4 className="font-bold text-emerald-700 mb-4 flex items-center"><Icon name="check" size={18} className="mr-2"/> 오늘 해야 할 일</h4>
+                        <form onSubmit={handleAddTodo} className="flex gap-2 mb-4">
+                          <input type="text" value={todoText} onChange={e=>setTodoText(e.target.value)} placeholder="편안한 마음으로 할 일을 적어보세요..." className="flex-1 p-3 border-none bg-white rounded-xl shadow-sm text-sm outline-none focus:ring-2 focus:ring-emerald-200 transition-shadow"/>
+                          <button type="submit" className="bg-emerald-500 text-white p-3 rounded-xl hover:bg-emerald-600 shadow-sm transition-colors"><Icon name="plus" size={20}/></button>
+                        </form>
+                        <div className="space-y-3 max-h-40 overflow-y-auto pr-1">
+                          {dayTodos.map(todo => (
+                            <div key={todo.id} className="flex items-center justify-between bg-white p-3 rounded-2xl shadow-sm border border-stone-50">
+                              <div className="flex items-center gap-3 cursor-pointer flex-1" onClick={() => toggleTodo(todo.id)}>
+                                <div className={`w-5 h-5 rounded-full flex items-center justify-center transition-colors ${todo.done ? 'bg-emerald-400 text-white' : 'border-2 border-stone-200'}`}>
+                                  {todo.done && <Icon name="check" size={14} strokeWidth={3}/>}
+                                </div>
+                                <span className={`text-sm font-medium ${todo.done ? 'line-through text-stone-300' : 'text-stone-600'}`}>{todo.text}</span>
+                              </div>
+                              <button onClick={()=>deleteTodo(todo.id)} className="text-stone-300 hover:text-rose-400 p-1 transition-colors"><Icon name="x" size={18}/></button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-6">
+                      <div className="bg-rose-50/30 p-5 rounded-3xl border border-rose-100/30">
+                        <h4 className="font-bold text-rose-800 mb-4 flex items-center"><Icon name="users" size={18} className="mr-2"/> 학생 출결 입력</h4>
+                        <div className="flex flex-wrap gap-2 mb-4 items-center">
+                          <select value={attStudent} onChange={e=>setAttStudent(e.target.value)} className="flex-1 min-w-[100px] p-3 border-none bg-white rounded-xl shadow-sm text-sm outline-none font-medium text-stone-600">
+                            {students.map(s => <option key={s.id} value={s.id}>{s.number}번 {s.name}</option>)}
+                          </select>
+                          
+                          <select value={attType} onChange={e=>setAttType(e.target.value)} className="w-24 p-3 border-none bg-white rounded-xl shadow-sm text-sm outline-none font-medium text-stone-600">
+                            <option value="결석">결석</option>
+                            <option value="조퇴">조퇴</option>
+                            <option value="지각">지각</option>
+                            <option value="결과">결과</option>
+                            <option value="교외체험">교외체험</option>
+                          </select>
+                          
+                          {['결석', '조퇴', '지각', '결과'].includes(attType) && (
+                            <select value={attSubType} onChange={e=>setAttSubType(e.target.value)} className="w-20 p-3 border-none bg-white rounded-xl shadow-sm text-sm outline-none font-medium text-stone-600">
+                              {ATTENDANCE_SUB_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                          )}
+                          
+                          <select value={attPeriod} onChange={e=>setAttPeriod(e.target.value)} className="w-24 p-3 border-none bg-white rounded-xl shadow-sm text-sm outline-none font-medium text-stone-600">
+                            <option value="">종일/전체</option>
+                            {[0,1,2,3,4,5,6,7,8].map(p => <option key={p} value={p}>{p}교시</option>)}
+                          </select>
+                          
+                          <label className="flex items-center gap-1.5 p-3 bg-white rounded-xl shadow-sm cursor-pointer hover:bg-stone-50 transition select-none h-full">
+                            <input 
+                              type="checkbox" 
+                              checked={attDocSubmitted} 
+                              onChange={e => setAttDocSubmitted(e.target.checked)} 
+                              className="w-4 h-4 accent-emerald-500 cursor-pointer" 
+                            />
+                            <span className="text-[13px] font-bold text-stone-600">서류제출</span>
+                          </label>
+
+                          <button onClick={handleAddAttendance} className="bg-rose-400 text-white p-3 rounded-xl hover:bg-rose-500 shadow-sm transition-colors flex items-center justify-center">
+                            <Icon name="plus" size={20}/>
+                          </button>
+                        </div>
+                        
+                        <div className="space-y-2 max-h-32 overflow-y-auto pr-1">
+                          {dayAttendance.map(att => {
+                            const st = students.find(s=>s.id === att.studentId);
+                            return (
+                              <div key={att.id} className="flex justify-between items-center bg-white p-3 rounded-2xl border border-stone-50 shadow-sm text-sm">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-extrabold text-stone-600">{st?.name}</span> 
+                                  <span className="text-stone-300">|</span> 
+                                  <span className={`font-bold ${
+                                    att.type==='결석'?'text-rose-500':
+                                    att.type==='조퇴'?'text-amber-500':
+                                    att.type==='지각'?'text-indigo-500':
+                                    att.type==='결과'?'text-violet-500':
+                                    'text-sky-500'
+                                  }`}>
+                                    {att.type}{att.subType ? `(${att.subType})` : ''} {att.period ? `${att.period}교시` : ''}
+                                  </span>
+                                  {att.docSubmitted && (
+                                    <span className="flex items-center gap-1 ml-1 px-1.5 py-0.5 bg-emerald-50 text-emerald-600 text-[10px] font-extrabold rounded-md border border-emerald-100">
+                                      <Icon name="file-check" size={10} /> 제출
+                                    </span>
+                                  )}
+                                </div>
+                                <button onClick={()=>handleDelAttendance(att.id)} className="text-stone-300 hover:text-rose-400 p-1 transition-colors"><Icon name="trash-2" size={16}/></button>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="bg-sky-50/30 p-5 rounded-3xl border border-sky-100/30">
+                        <h4 className="font-bold text-sky-800 mb-4 flex items-center"><Icon name="book-open" size={18} className="mr-2"/> 당일 상담 기록</h4>
+                        <div className="space-y-3 mb-4">
+                          <select value={counselStudent} onChange={e=>setCounselStudent(e.target.value)} className="w-full p-3 border-none bg-white rounded-xl shadow-sm text-sm outline-none font-medium text-stone-600">
+                            {students.map(s => <option key={s.id} value={s.id}>{s.number}번 {s.name}</option>)}
+                          </select>
+                          <textarea 
+                            value={counselText} onChange={e=>setCounselText(e.target.value)}
+                            placeholder="아이의 이야기를 남겨주세요..."
+                            className="w-full p-3 border-none bg-white rounded-xl shadow-sm text-sm outline-none resize-none h-20 focus:ring-2 focus:ring-sky-200 transition-shadow"
+                          />
+                          <button onClick={handleAddCounseling} className="w-full bg-sky-400 text-white py-3 rounded-xl hover:bg-sky-500 font-bold text-sm shadow-sm transition-colors">상담 기록 저장</button>
+                        </div>
+                        <div className="space-y-3 max-h-32 overflow-y-auto pr-1">
+                          {dayCounseling.map(c => {
+                            const st = students.find(s=>s.id === c.studentId);
+                            return (
+                              <div key={c.id} className="bg-white p-3.5 rounded-2xl border border-stone-50 shadow-sm text-sm">
+                                <div className="font-bold text-sky-700 mb-1">{st?.name}</div>
+                                <p className="text-stone-500 truncate leading-relaxed">{c.content}</p>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="bg-amber-50/30 p-5 rounded-3xl border border-amber-100/30">
+                        <h4 className="font-bold text-amber-800 mb-4 flex items-center"><Icon name="edit-2" size={18} className="mr-2"/> 일일 메모</h4>
+                        <textarea 
+                          value={memoText} 
+                          onChange={e=>setLocalMemoText(e.target.value)} 
+                          onBlur={saveMemo}
+                          placeholder="오늘 하루 있었던 일이나 잊지 말아야 할 메모를 편안하게 적어보세요."
+                          className="w-full p-4 border-none bg-white rounded-2xl shadow-sm text-sm outline-none resize-none h-24 focus:ring-2 focus:ring-amber-200 transition-shadow leading-relaxed"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          };
+
+          const StudentDetailModal = () => {
+            if (!selectedStudentForModal) return null;
+            
+            const student = students.find(s => s.id === selectedStudentForModal);
+            if (!student) return null;
+
+            const studentRecords = [];
+            Object.entries(attendance).forEach(([date, records]) => {
+              records.forEach(record => {
+                if (record.studentId === selectedStudentForModal) {
+                  studentRecords.push({ ...record, date });
+                }
+              });
+            });
+            studentRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+            const handleDelete = (date, recordId) => {
+              if(window.confirm('이 출결 기록을 삭제하시겠습니까?')) {
+                setAttendance(prev => ({
+                  ...prev,
+                  [date]: prev[date].filter(r => r.id !== recordId)
+                }));
+              }
+            };
+
+            return (
+              <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <div className="bg-[#fdfbf7] rounded-[2rem] w-full max-w-md max-h-[80vh] flex flex-col shadow-2xl overflow-hidden">
+                  <div className="px-6 py-6 border-b border-stone-100 flex justify-between items-center bg-white">
+                    <div>
+                      <h3 className="text-xl font-extrabold text-stone-700 flex items-center">
+                        <Icon name="users" size={24} className="mr-3 text-emerald-500" />
+                        {student.name} <span className="text-stone-400 text-sm font-bold ml-2">학생 출결 상세</span>
+                      </h3>
+                    </div>
+                    <button onClick={() => setSelectedStudentForModal(null)} className="p-2 hover:bg-stone-100 rounded-full transition-colors text-stone-400"><Icon name="x" size={20}/></button>
+                  </div>
+                  
+                  <div className="p-6 overflow-y-auto">
+                    {studentRecords.length === 0 ? (
+                      <div className="text-center py-12 text-stone-400 bg-white rounded-3xl border border-dashed border-stone-200 font-medium shadow-sm">
+                        기록된 출결 사항이 없습니다. <br/> <span className="text-sm text-stone-300 mt-2 block">오늘도 평안한 하루네요.</span>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {studentRecords.map(record => (
+                          <div key={record.id} className="flex justify-between items-center p-4 border border-stone-100 rounded-2xl hover:border-emerald-200 hover:shadow-sm bg-white transition-all">
+                            <div className="flex items-center gap-3">
+                              <span className="font-extrabold text-stone-600">{record.date}</span>
+                              <div className="flex flex-col items-start gap-1">
+                                <span className={`px-2.5 py-1 rounded-xl text-xs font-extrabold flex items-center gap-1 ${
+                                  record.type === '결석' ? 'bg-rose-50 text-rose-500' : 
+                                  record.type === '조퇴' ? 'bg-amber-50 text-amber-500' : 
+                                  record.type === '지각' ? 'bg-indigo-50 text-indigo-500' : 
+                                  record.type === '결과' ? 'bg-violet-50 text-violet-500' : 
+                                  'bg-sky-50 text-sky-500'
+                                }`}>
+                                  {record.type}{record.subType ? `(${record.subType})` : ''}
+                                  {record.period ? ` ${record.period}교시` : ''}
+                                </span>
+                                {record.docSubmitted && (
+                                  <span className="flex items-center gap-1 px-2 py-0.5 bg-emerald-50 border border-emerald-100 text-emerald-600 text-[10px] font-extrabold rounded-md">
+                                    <Icon name="file-check" size={10} /> 서류제출 완료
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <button onClick={() => handleDelete(record.date, record.id)} className="text-stone-300 hover:text-rose-400 transition-colors p-2 rounded-full hover:bg-rose-50" title="기록 삭제">
+                              <Icon name="trash-2" size={18}/>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-5 border-t border-stone-100 bg-white">
+                    <button onClick={() => setSelectedStudentForModal(null)} className="w-full py-4 bg-stone-700 text-white font-bold rounded-2xl hover:bg-stone-800 active:scale-95 transition-all shadow-sm">닫기</button>
+                  </div>
+                </div>
+              </div>
+            );
+          };
+
+          const EventEditModal = () => {
+            if (!isEventModalOpen) return null;
+            
+            const [newEventDate, setNewEventDate] = useState('');
+            const [newEventName, setNewEventName] = useState('');
+            const [newEventType, setNewEventType] = useState('event'); 
+
+            const handleAddEvent = () => {
+              if (!newEventDate || !newEventName.trim()) return;
+              if (newEventType === 'holiday') {
+                setHolidays(prev => ({ ...prev, [newEventDate]: newEventName }));
+              } else {
+                setCustomEvents(prev => ({ ...prev, [newEventDate]: newEventName }));
+              }
+              setNewEventDate('');
+              setNewEventName('');
+            };
+
+            const handleDelete = (date, type) => {
+              if (type === 'holiday') {
+                const updated = { ...holidays };
+                delete updated[date];
+                setHolidays(updated);
+              } else {
+                const updated = { ...customEvents };
+                delete updated[date];
+                setCustomEvents(updated);
+              }
+            };
+
+            const combinedEvents = [
+              ...Object.entries(holidays).map(([date, name]) => ({ date, name, type: 'holiday' })),
+              ...Object.entries(customEvents).map(([date, name]) => ({ date, name, type: 'event' }))
+            ].sort((a, b) => a.date.localeCompare(b.date));
+
+            return (
+              <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <div className="bg-[#fdfbf7] rounded-[2rem] w-full max-w-md p-6 shadow-2xl flex flex-col max-h-[85vh]">
+                  <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-xl font-extrabold flex items-center gap-2 text-stone-700"><Icon name="calendar" className="text-emerald-500"/>학사일정 편집</h3>
+                    <button onClick={() => setIsEventModalOpen(false)} className="p-2 hover:bg-stone-200 rounded-full transition text-stone-400"><Icon name="x" size={20}/></button>
+                  </div>
+                  
+                  <div className="flex flex-col gap-3 mb-6 bg-white p-5 rounded-3xl border border-stone-100 shadow-sm">
+                    <div className="flex gap-2">
+                      <select value={newEventType} onChange={e => setNewEventType(e.target.value)} className="w-32 p-3 bg-stone-50 border-none rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-200 font-bold text-stone-600">
+                        <option value="event">일반일정</option>
+                        <option value="holiday">공휴일(휴업)</option>
+                      </select>
+                      <input type="date" value={newEventDate} onChange={e => setNewEventDate(e.target.value)} className="flex-1 p-3 bg-stone-50 border-none rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-200 font-medium text-stone-600" />
+                    </div>
+                    <input 
+                      type="text" 
+                      placeholder="일정 이름 (예: 현장체험학습, 개교기념일)" 
+                      value={newEventName} 
+                      onChange={e => setNewEventName(e.target.value)} 
+                      className="w-full p-3 bg-stone-50 border-none rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-200 font-medium text-stone-600 placeholder:text-stone-400" 
+                    />
+                    <button onClick={handleAddEvent} className="w-full bg-emerald-500 text-white py-3.5 rounded-xl font-bold hover:bg-emerald-600 transition active:scale-95 flex justify-center items-center gap-2 mt-2 shadow-sm">
+                      <Icon name="plus" size={18} strokeWidth={3} /> 일정 추가하기
+                    </button>
+                  </div>
+                  
+                  <div className="flex-1 overflow-y-auto space-y-3 pr-1 border-t border-stone-100 pt-5">
+                    {combinedEvents.length === 0 ? (
+                      <p className="text-center text-sm text-stone-400 py-6 font-medium">등록된 일정이 없습니다.</p>
+                    ) : (
+                      combinedEvents.map((item) => (
+                        <div key={`${item.date}-${item.type}`} className="flex justify-between items-center p-4 bg-white hover:bg-stone-50 rounded-2xl border border-stone-100 transition shadow-sm">
+                          <div>
+                            <div className="flex items-center gap-3">
+                              <span className={`text-[11px] px-2 py-1 rounded-lg font-extrabold ${item.type === 'holiday' ? 'bg-rose-50 text-rose-500' : 'bg-emerald-50 text-emerald-600'}`}>
+                                {item.type === 'holiday' ? '공휴일' : '일정'}
+                              </span>
+                              <span className="font-extrabold text-stone-600">{item.name}</span>
+                            </div>
+                            <div className="text-xs font-bold text-stone-400 mt-2">{item.date}</div>
+                          </div>
+                          <button onClick={() => handleDelete(item.date, item.type)} className="p-2.5 text-stone-300 hover:bg-rose-50 hover:text-rose-400 rounded-xl transition">
+                            <Icon name="trash-2" size={18} />
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  
+                  <div className="mt-5 border-t border-stone-100 pt-5">
+                    <button onClick={() => setIsEventModalOpen(false)} className="w-full py-4 bg-stone-700 text-white font-bold rounded-2xl shadow-sm hover:bg-stone-800 active:scale-95 transition-all text-lg">완료 및 닫기</button>
+                  </div>
+                </div>
+              </div>
+            );
+          };
+
+          return (
+            <div className="min-h-screen bg-[#fdfbf7] text-stone-800 pb-10">
+              {/* Navbar */}
+              <nav className="bg-emerald-600 text-white shadow-sm border-b border-emerald-700/50">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                  <div className="flex items-center justify-between h-16">
+                    <div className="flex items-center">
+                      <Icon name="book-open" size={28} className="mr-3 text-emerald-100" />
+                      <span className="font-extrabold text-xl tracking-wide">Teachers' Mate <span className="text-emerald-200 text-sm font-bold ml-1">(담임ver.)</span></span>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Tabs */}
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                  <div className="flex space-x-2 overflow-x-auto pt-2 pb-0 scrollbar-hide">
+                    {[
+                      { id: 'calendar', name: '학사달력', icon: 'calendar' },
+                      { id: 'roster', name: '학급명렬표', icon: 'users' },
+                      { id: 'counseling', name: '상담', icon: 'book-open' },
+                      { id: 'timetable', name: '기초시간표', icon: 'clock' },
+                      { id: 'evaluation', name: '평가계획', icon: 'file-text' },
+                    ].map(tab => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id)}
+                        className={`flex items-center px-5 py-3 rounded-t-2xl transition-colors whitespace-nowrap text-sm ${
+                          activeTab === tab.id 
+                            ? 'bg-[#fdfbf7] text-emerald-700 font-extrabold shadow-[0_-2px_10px_rgba(0,0,0,0.05)]' 
+                            : 'text-emerald-100 hover:bg-emerald-500 font-bold'
+                        }`}
+                      >
+                        <Icon name={tab.icon} size={18} className="mr-2" /> {tab.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </nav>
+
+              {/* Main Content */}
+              <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                
+                {activeTab === 'calendar' && (
+                  <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100">
+                    <div className="flex items-center justify-between mb-8">
+                      <h2 className="text-2xl font-extrabold text-stone-700 flex items-center">
+                        <Icon name="calendar" className="mr-3 text-emerald-500"/>
+                        {currentDate.getFullYear()}년 {currentDate.getMonth() + 1}월
+                      </h2>
+                      <div className="flex space-x-2">
+                        <button 
+                          onClick={() => setIsEventModalOpen(true)} 
+                          className={`px-4 py-2 rounded-xl font-bold transition text-sm flex items-center gap-2 bg-stone-50 hover:bg-stone-100 text-stone-600`}
+                        >
+                          <Icon name="edit-2" size={16} /> 학사일정 편집
+                        </button>
+                        <div className="w-px bg-stone-200 mx-2"></div>
+                        <button onClick={prevMonth} className="p-2.5 bg-stone-50 rounded-xl hover:bg-stone-100 transition text-stone-600"><Icon name="chevron-left" size={20}/></button>
+                        <button onClick={() => setCurrentDate(new Date())} className="px-5 py-2.5 bg-emerald-50 text-emerald-600 rounded-xl hover:bg-emerald-100 font-bold transition text-sm">오늘</button>
+                        <button onClick={nextMonth} className="p-2.5 bg-stone-50 rounded-xl hover:bg-stone-100 transition text-stone-600"><Icon name="chevron-right" size={20}/></button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-7 gap-3 mt-4">
+                      {['일', '월', '화', '수', '목', '금', '토'].map((day, i) => (
+                        <div key={day} className={`py-3 text-center font-extrabold text-sm rounded-xl mb-2
+                          ${i === 0 ? 'text-rose-400 bg-rose-50/50' : i === 6 ? 'text-sky-400 bg-sky-50/50' : 'text-stone-500 bg-stone-50/50'}`}>
+                          {day}
+                        </div>
+                      ))}
+                      {renderCalendar()}
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'roster' && renderRoster()}
+                {activeTab === 'counseling' && renderCounseling()}
+                {activeTab === 'timetable' && renderTimetable()}
+                {activeTab === 'evaluation' && renderEvaluation()}
+
+              </main>
+
+              {/* Copyright Footer */}
+              <footer className="w-full text-center pt-8 pb-4 text-stone-400 text-sm font-bold">
+                &copy; 2026 Appro Lee. All rights reserved.
+              </footer>
+
+              {/* Modals */}
+              <DailyModal />
+              <StudentDetailModal />
+              <EventEditModal />
+              
+            </div>
+          );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
