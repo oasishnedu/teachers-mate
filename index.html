@@ -176,6 +176,7 @@
                                 }
                             } else if (step === 'CHANGE_PIN_NEW') {
                                 // 새 비밀번호 입력 완료 단계
+                                setNewPinStore(newPinStore); // Fix minor warning, using newPin directly below
                                 setNewPinStore(newPin);
                                 setPin('');
                                 setStep('CHANGE_PIN_HINT');
@@ -999,7 +1000,6 @@
                     <input type="file" accept=".xlsx, .xls, .csv" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
                     <button onClick={() => fileInputRef.current.click()} className="px-4 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl hover:bg-emerald-100 font-bold transition-colors text-sm flex items-center shadow-sm gap-1.5"><Icon name="upload" size={16} /> 엑셀 업로드</button>
                     <button onClick={handleExportToSheetsEvaluation} className="px-4 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-xl hover:bg-blue-100 font-bold transition-colors text-sm flex items-center shadow-sm gap-1.5" title="이 버튼을 한 번 클릭하고 빈 스프레드시트가 나타났을 때 *Ctrl + V (붙여넣기)*만 하시면 그동안 기록된 표가 구글 스프레드시트에 완벽한 형태로 쏙 들어갑니다!"><Icon name="copy" size={16} /> 스프레드시트로 내보내기</button>
-                    <button onClick={() => setEvaluations([...evaluations, { id: Date.now(), semester: '1학기', isDone: false, subject: '', unit: '', element: '', domain: '', period: '', method: '' }])} className="px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold text-sm shadow-sm transition-all active:scale-95 ml-2 flex items-center gap-1.5"><Icon name="plus" size={16}/> 항목 추가</button>
                   </div>
                 </div>
                 {renderTable('1학기', [3, 4, 5, 6, 7, 0])}
