@@ -176,7 +176,6 @@
                                 }
                             } else if (step === 'CHANGE_PIN_NEW') {
                                 // 새 비밀번호 입력 완료 단계
-                                setNewPinStore(newPinStore); // Fix minor warning, using newPin directly below
                                 setNewPinStore(newPin);
                                 setPin('');
                                 setStep('CHANGE_PIN_HINT');
@@ -446,14 +445,28 @@
 
           const studentStats = useMemo(() => {
             const stats = {};
-            students.forEach(s => { stats[s.id] = { absent: 0, early: 0, late: 0, missed: 0, field: 0, ftCount: 0, ftRecords: [] }; });
+            students.forEach(s => { stats[s.id] = { absent: 0, early: 0, late: 0, missed: 0, period: 0, recognized: 0, field: 0, ftCount: 0, ftRecords: [] }; });
             Object.values(attendance).forEach(dayRecords => {
               dayRecords.forEach(record => {
                 if (stats[record.studentId]) {
-                  if (record.type === '결석') stats[record.studentId].absent++;
-                  if (record.type === '조퇴') stats[record.studentId].early++;
-                  if (record.type === '지각') stats[record.studentId].late++;
-                  if (record.type === '결과') stats[record.studentId].missed++;
+                  const sType = record.subType;
+                  if (sType === '생리') {
+                    stats[record.studentId].period++;
+                  } else {
+                    if (record.type === '결석') {
+                      if (sType === '감염병' || sType === '경조사') {
+                        stats[record.studentId].recognized++;
+                      } else {
+                        stats[record.studentId].absent++;
+                      }
+                    } else if (record.type === '조퇴') {
+                      stats[record.studentId].early++;
+                    } else if (record.type === '지각') {
+                      stats[record.studentId].late++;
+                    } else if (record.type === '결과') {
+                      stats[record.studentId].missed++;
+                    }
+                  }
                 }
               });
             });
@@ -483,7 +496,6 @@
               reader.onload = (evt) => {
                   try {
                       const parsed = JSON.parse(evt.target.result);
-                      // 간단한 유효성 검사
                       if (parsed && typeof parsed === 'object' && Array.isArray(parsed.students)) {
                           localStorage.setItem('tm_local_data', JSON.stringify(parsed));
                           alert('✅ 데이터 복구가 완료되었습니다!\n모든 데이터가 완벽하게 복원되었습니다. 앱을 새로고침합니다.');
@@ -501,12 +513,8 @@
 
           // --- 달력 기록 스프레드시트 내보내기 ---
           const handleExportCalendarToSheets = () => {
-              // 메모, 할일, 일정이 있는 모든 날짜 수집
               const allDatesSet = new Set([
-                  ...Object.keys(memos),
-                  ...Object.keys(todos),
-                  ...Object.keys(holidays),
-                  ...Object.keys(customEvents)
+                  ...Object.keys(memos), ...Object.keys(todos), ...Object.keys(holidays), ...Object.keys(customEvents)
               ]);
               const sortedDates = Array.from(allDatesSet).sort();
 
@@ -519,14 +527,11 @@
                   const dayTodos = todos[dateStr] || [];
                   const todoList = dayTodos.length > 0 ? dayTodos.map(t => `[${t.done ? 'O' : 'X'}] ${t.text}`).join('\n') : '-';
                   
-                  // 비어있는 날짜 필터링 (일정도 없고, 메모도 없고, 할일도 없는 경우 제외)
                   if (event === '-' && memo === '-' && todoList === '-') return null;
-                  
                   return [dateStr, dayStr, event, memo, todoList];
-              }).filter(Boolean); // null 제거
+              }).filter(Boolean);
 
               if (data.length === 0) return alert('내보낼 달력 기록(일정, 메모, 할일)이 없습니다.');
-              
               exportToGoogleSheets(headers, data, '학사달력_기록');
           };
 
@@ -757,17 +762,17 @@
 
           const renderRoster = () => {
             const handleExport = () => {
-              const headers = ['번호', '이름', '결석', '조퇴', '지각', '결과', '교외체험'];
+              const headers = ['번호', '이름', '결석', '조퇴', '지각', '결과', '생출', '인정', '교외체험'];
               const data = [...students].sort((a,b)=>a.number - b.number).map(s => [
-                s.number, s.name, studentStats[s.id].absent, studentStats[s.id].early, studentStats[s.id].late, studentStats[s.id].missed, studentStats[s.id].field
+                s.number, s.name, studentStats[s.id].absent, studentStats[s.id].early, studentStats[s.id].late, studentStats[s.id].missed, studentStats[s.id].period, studentStats[s.id].recognized, studentStats[s.id].field
               ]);
               exportToExcel('출결통계.xlsx', headers, data);
             };
 
             const handleExportToSheetsRoster = () => {
-                const headers = ['번호', '이름', '결석', '조퇴', '지각', '결과', '교외체험'];
+                const headers = ['번호', '이름', '결석', '조퇴', '지각', '결과', '생출', '인정', '교외체험'];
                 const data = [...students].sort((a,b)=>a.number - b.number).map(s => [
-                  s.number, s.name, studentStats[s.id].absent, studentStats[s.id].early, studentStats[s.id].late, studentStats[s.id].missed, studentStats[s.id].field
+                  s.number, s.name, studentStats[s.id].absent, studentStats[s.id].early, studentStats[s.id].late, studentStats[s.id].missed, studentStats[s.id].period, studentStats[s.id].recognized, studentStats[s.id].field
                 ]);
                 exportToGoogleSheets(headers, data, '출결통계');
             };
@@ -790,10 +795,10 @@
                 <p className="text-sm text-stone-400 mb-4">* 학생 행을 클릭하면 상세 출결 기록을 볼 수 있습니다. (교외체험은 '교외체험 매니저' 탭에서 관리됩니다.)</p>
 
                 <div className="overflow-x-auto rounded-2xl border border-stone-100">
-                  <table className="w-full text-left border-collapse min-w-[800px]">
+                  <table className="w-full text-left border-collapse min-w-[900px]">
                     <thead>
                       <tr className="bg-stone-50 border-b border-stone-100 text-stone-500 text-sm">
-                        <th className="p-4 w-16 text-center font-bold">번호</th><th className="p-4 font-bold">이름</th><th className="p-4 w-20 text-center text-rose-500 font-bold">결석</th><th className="p-4 w-20 text-center text-amber-500 font-bold">조퇴</th><th className="p-4 w-20 text-center text-indigo-500 font-bold">지각</th><th className="p-4 w-20 text-center text-violet-500 font-bold">결과</th><th className="p-4 w-24 text-center text-blue-500 font-bold">교외체험</th><th className="p-4 w-24 text-center font-bold">관리</th>
+                        <th className="p-4 w-12 text-center font-bold">번호</th><th className="p-4 font-bold">이름</th><th className="p-4 w-16 text-center text-rose-500 font-bold">결석</th><th className="p-4 w-16 text-center text-amber-500 font-bold">조퇴</th><th className="p-4 w-16 text-center text-indigo-500 font-bold">지각</th><th className="p-4 w-16 text-center text-violet-500 font-bold">결과</th><th className="p-4 w-16 text-center text-pink-500 font-bold">생출</th><th className="p-4 w-16 text-center text-teal-500 font-bold">인정</th><th className="p-4 w-20 text-center text-blue-500 font-bold">교외체험</th><th className="p-4 w-20 text-center font-bold">관리</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -801,14 +806,14 @@
                         <tr key={student.id} onClick={() => setSelectedStudentForModal(student.id)} className="border-b border-stone-50 hover:bg-stone-50/50 transition-colors cursor-pointer">
                           <td className="p-2 text-center" onClick={e => e.stopPropagation()}><input type="number" value={student.number} onChange={(e) => updateStudent(student.id, 'number', Number(e.target.value))} className="w-12 text-center bg-transparent border-b-2 border-transparent hover:border-stone-300 focus:border-emerald-400 focus:outline-none transition-colors" /></td>
                           <td className="p-2" onClick={e => e.stopPropagation()}><input type="text" value={student.name} placeholder="이름 입력" onChange={(e) => updateStudent(student.id, 'name', e.target.value)} className="w-full bg-transparent border-b-2 border-transparent hover:border-stone-300 focus:border-emerald-400 focus:outline-none px-2 py-1 transition-colors font-bold" /></td>
-                          <td className="p-4 text-center bg-rose-50/30 font-bold text-rose-600">{studentStats[student.id]?.absent || 0}</td><td className="p-4 text-center bg-amber-50/30 font-bold text-amber-600">{studentStats[student.id]?.early || 0}</td><td className="p-4 text-center bg-indigo-50/30 font-bold text-indigo-600">{studentStats[student.id]?.late || 0}</td><td className="p-4 text-center bg-violet-50/30 font-bold text-violet-600">{studentStats[student.id]?.missed || 0}</td><td className="p-4 text-center bg-blue-50/30 font-bold text-blue-600">{studentStats[student.id]?.field || 0}</td>
+                          <td className="p-4 text-center bg-rose-50/30 font-bold text-rose-600">{studentStats[student.id]?.absent || 0}</td><td className="p-4 text-center bg-amber-50/30 font-bold text-amber-600">{studentStats[student.id]?.early || 0}</td><td className="p-4 text-center bg-indigo-50/30 font-bold text-indigo-600">{studentStats[student.id]?.late || 0}</td><td className="p-4 text-center bg-violet-50/30 font-bold text-violet-600">{studentStats[student.id]?.missed || 0}</td><td className="p-4 text-center bg-pink-50/30 font-bold text-pink-600">{studentStats[student.id]?.period || 0}</td><td className="p-4 text-center bg-teal-50/30 font-bold text-teal-600">{studentStats[student.id]?.recognized || 0}</td><td className="p-4 text-center bg-blue-50/30 font-bold text-blue-600">{studentStats[student.id]?.field || 0}</td>
                           <td className="p-4 text-center space-x-3" onClick={e => e.stopPropagation()}>
                             <button onClick={() => setSelectedStudentForModal(student.id)} className="text-stone-300 hover:text-emerald-500 transition-colors"><Icon name="search" size={18} /></button>
                             <button onClick={() => removeStudent(student.id)} className="text-stone-300 hover:text-rose-400 transition-colors"><Icon name="trash-2" size={18} /></button>
                           </td>
                         </tr>
                       ))}
-                      {students.length === 0 && (<tr><td colSpan="8" className="text-center p-10 text-stone-400 font-medium">아래 '명렬표 일괄 설정'을 통해 학생을 추가해주세요.</td></tr>)}
+                      {students.length === 0 && (<tr><td colSpan="10" className="text-center p-10 text-stone-400 font-medium">아래 '명렬표 일괄 설정'을 통해 학생을 추가해주세요.</td></tr>)}
                     </tbody>
                   </table>
                 </div>
@@ -904,8 +909,8 @@
             const deleteEval = (id) => { if(window.confirm('항목을 삭제하시겠습니까?')) setEvaluations(evaluations.filter(e => e.id !== id)); }
 
             const handleDownloadTemplate = () => {
-                const headers = ['과목', '단원', '평가 요소', '영역', '시기', '방법'];
-                const data = [['국어', '1. 비교하며 읽어요', '이야기의 세계와 \n현실 세계를 비교\n하며 작품 감상하기', '문학', '3월', '서술 논술 평가']];
+                const headers = ['실시여부', '과목', '단원명', '평가 요소', '영역', '시기', '평가 방법', '수업 방법 및 평가 주안점', '도구'];
+                const data = [['미실시', '국어', '1. 비교하며 읽어요', '이야기 세계와 현실 비교하기', '문학', '3월 4주', '관찰법', '현실과 이야기의 차이점 찾기', '활동지']];
                 exportToExcel('평가계획_업로드양식.xlsx', headers, data);
             };
 
@@ -941,7 +946,17 @@
                         const period = String(row['시기'] || '').trim(); const month = getMonth(period);
                         const semester = (month >= 3 && month <= 7) ? '1학기' : (month > 0 ? '2학기' : '1학기');
                         const isDone = ['실시', '완료', 'o', 'O', 'y', 'Y', 'true', 'TRUE', '실시완료'].includes(String(row['실시여부'] || row['완료여부'] || row['완료 여부'] || '').trim());
-                        return { id: Date.now() + idx, isDone, subject: row['과목'] || '', unit: row['단원명'] || row['단원'] || '', element: row['평가요소'] || row['평가 요소'] || '', domain: row['영역'] || '', period, method: row['방법'] || '', semester };
+                        return { 
+                            id: Date.now() + idx, 
+                            isDone, 
+                            subject: row['과목'] || '', 
+                            unit: row['단원명'] || row['단원'] || '', 
+                            element: row['평가 요소'] || row['평가요소'] || '', 
+                            domain: row['영역'] || '', 
+                            period, 
+                            method: row['평가 방법'] || row['방법'] || row['도구'] || '', 
+                            semester 
+                        };
                     });
                     setEvaluations(prev => [...prev, ...newEvals]);
                     e.target.value = '';
@@ -1136,7 +1151,7 @@
                             return (
                               <div key={att.id} className="flex justify-between items-center bg-white p-3 rounded-2xl border border-stone-50 shadow-sm text-sm">
                                 <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="font-extrabold text-stone-600">{st?.name}</span> <span className="text-stone-300">|</span> 
+                                  <span className="font-extrabold text-stone-600">{st ? st.name : '삭제된 학생'}</span> <span className="text-stone-300">|</span> 
                                   <span className={`font-bold ${att.type==='결석'?'text-rose-500':att.type==='조퇴'?'text-amber-500':att.type==='지각'?'text-indigo-500':att.type==='결과'?'text-violet-500':'text-sky-500'}`}>{att.type}{att.subType ? `(${att.subType})` : ''} {att.period ? `${att.period}교시` : ''}</span>
                                   {isPaper && (<span className="flex items-center gap-1 ml-1 px-1.5 py-0.5 bg-emerald-50 text-emerald-600 text-[11px] font-extrabold rounded-md border border-emerald-100"><Icon name="file-check" size={12} /> 서류</span>)}
                                   {isNeis && (<span className="flex items-center gap-1 ml-1 px-1.5 py-0.5 bg-blue-50 text-blue-600 text-[11px] font-extrabold rounded-md border border-blue-100"><Icon name="monitor" size={12} /> NEIS</span>)}
@@ -1170,7 +1185,7 @@
                           {dayFieldTrips.length === 0 ? (<div className="text-sm text-stone-400 text-center py-4 font-medium bg-white/50 rounded-2xl">당일 체험학습 없음.</div>) : (
                             dayFieldTrips.map(ft => {
                               const st = students.find(s=>s.id === ft.studentId);
-                              return (<div key={ft.id} className="flex justify-between items-center bg-white p-3 rounded-2xl border border-stone-50 shadow-sm text-sm"><div className="font-extrabold text-stone-600 flex items-center gap-2">{st?.number}번 {st?.name} <span className="text-[11px] px-2 py-0.5 bg-blue-50 text-blue-600 rounded-md">교외체험 ({ft.duration}일)</span></div></div>)
+                              return (<div key={ft.id} className="flex justify-between items-center bg-white p-3 rounded-2xl border border-stone-50 shadow-sm text-sm"><div className="font-extrabold text-stone-600 flex items-center gap-2">{st ? `${st.number}번 ${st.name}` : '삭제된 학생'} <span className="text-[11px] px-2 py-0.5 bg-blue-50 text-blue-600 rounded-md">교외체험 ({ft.duration}일)</span></div></div>)
                             })
                           )}
                         </div>
@@ -1189,7 +1204,7 @@
                         <div className="space-y-3 max-h-32 overflow-y-auto pr-1">
                           {dayCounseling.map(c => {
                             const st = students.find(s=>s.id === c.studentId);
-                            return (<div key={c.id} className="bg-white p-3.5 rounded-2xl border border-stone-50 shadow-sm text-sm"><div className="font-bold text-sky-700 mb-1">{st?.name}</div><p className="text-stone-500 truncate leading-relaxed">{c.content}</p></div>)
+                            return (<div key={c.id} className="bg-white p-3.5 rounded-2xl border border-stone-50 shadow-sm text-sm"><div className="font-bold text-sky-700 mb-1">{st ? st.name : '삭제된 학생'}</div><p className="text-stone-500 truncate leading-relaxed">{c.content}</p></div>)
                           })}
                         </div>
                       </div>
@@ -1233,6 +1248,7 @@
             studentRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
 
             const handleDelete = (date, recordId) => { if(window.confirm('이 출결 기록을 삭제하시겠습니까?')) setAttendance(prev => ({ ...prev, [date]: prev[date].filter(r => r.id !== recordId) })); };
+            const stats = studentStats[selectedStudentForModal] || { absent: 0, early: 0, late: 0, missed: 0, period: 0, recognized: 0, field: 0 };
 
             return (
               <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setSelectedStudentForModal(null)}>
@@ -1241,18 +1257,48 @@
                     <h3 className="text-xl font-extrabold text-stone-700 flex items-center"><Icon name="users" size={24} className="mr-3 text-emerald-500" />{student.name} <span className="text-stone-400 text-sm font-bold ml-2">학생 출결 상세</span></h3>
                     <button onClick={() => setSelectedStudentForModal(null)} className="p-2 hover:bg-stone-100 rounded-full transition-colors text-stone-400"><Icon name="x" size={20}/></button>
                   </div>
-                  <div className="p-6 overflow-y-auto">
+                  
+                  <div className="bg-stone-50 p-4 border-b border-stone-100 grid grid-cols-4 sm:grid-cols-7 gap-2">
+                    <div className="bg-white rounded-xl p-2 text-center shadow-sm border border-stone-100"><span className="text-[10px] font-bold text-rose-400 block mb-1">결석</span><div className="font-black text-rose-600">{stats.absent}</div></div>
+                    <div className="bg-white rounded-xl p-2 text-center shadow-sm border border-stone-100"><span className="text-[10px] font-bold text-amber-400 block mb-1">조퇴</span><div className="font-black text-amber-600">{stats.early}</div></div>
+                    <div className="bg-white rounded-xl p-2 text-center shadow-sm border border-stone-100"><span className="text-[10px] font-bold text-indigo-400 block mb-1">지각</span><div className="font-black text-indigo-600">{stats.late}</div></div>
+                    <div className="bg-white rounded-xl p-2 text-center shadow-sm border border-stone-100"><span className="text-[10px] font-bold text-violet-400 block mb-1">결과</span><div className="font-black text-violet-600">{stats.missed}</div></div>
+                    <div className="bg-white rounded-xl p-2 text-center shadow-sm border border-stone-100"><span className="text-[10px] font-bold text-pink-400 block mb-1">생출</span><div className="font-black text-pink-600">{stats.period}</div></div>
+                    <div className="bg-white rounded-xl p-2 text-center shadow-sm border border-stone-100"><span className="text-[10px] font-bold text-teal-400 block mb-1">인정</span><div className="font-black text-teal-600">{stats.recognized}</div></div>
+                    <div className="bg-white rounded-xl p-2 text-center shadow-sm border border-stone-100 col-span-2 sm:col-span-1"><span className="text-[10px] font-bold text-blue-400 block mb-1">교외</span><div className="font-black text-blue-600">{stats.field}</div></div>
+                  </div>
+
+                  <div className="p-6 overflow-y-auto flex-1">
                     {studentRecords.length === 0 ? (<div className="text-center py-12 text-stone-400 bg-white rounded-3xl border border-dashed border-stone-200 font-medium shadow-sm">기록된 출결 사항이 없습니다.</div>) : (
                       <div className="space-y-3">
                         {studentRecords.map(record => {
                           const isPaper = record.docType === 'paper' || record.docSubmitted; const isNeis = record.docType === 'neis';
+                          let displayType = record.type;
+                          let displayClass = 'bg-stone-50 text-stone-500';
+                          
+                          if (record.subType === '생리') {
+                            displayType = `생출(${record.type})`;
+                            displayClass = 'bg-pink-50 text-pink-500 border border-pink-100';
+                          } else if (record.type === '결석' && (record.subType === '감염병' || record.subType === '경조사')) {
+                            displayType = `인정결석(${record.subType})`;
+                            displayClass = 'bg-teal-50 text-teal-600 border border-teal-100';
+                          } else {
+                            if (record.type === '결석') displayClass = 'bg-rose-50 text-rose-500 border border-rose-100';
+                            else if (record.type === '조퇴') displayClass = 'bg-amber-50 text-amber-500 border border-amber-100';
+                            else if (record.type === '지각') displayClass = 'bg-indigo-50 text-indigo-500 border border-indigo-100';
+                            else if (record.type === '결과') displayClass = 'bg-violet-50 text-violet-500 border border-violet-100';
+                            else displayClass = 'bg-sky-50 text-sky-500 border border-sky-100';
+                            
+                            displayType = `${record.type}${record.subType ? `(${record.subType})` : ''}`;
+                          }
+
                           return (
                             <div key={record.id} className="flex justify-between items-center p-4 border border-stone-100 rounded-2xl hover:border-emerald-200 hover:shadow-sm bg-white transition-all">
                               <div className="flex items-center gap-3">
                                 <span className="font-extrabold text-stone-600">{record.date}</span>
                                 <div className="flex flex-col items-start gap-1">
-                                  <span className={`px-2.5 py-1 rounded-xl text-xs font-extrabold flex items-center gap-1 ${record.type === '결석' ? 'bg-rose-50 text-rose-500' : record.type === '조퇴' ? 'bg-amber-50 text-amber-500' : record.type === '지각' ? 'bg-indigo-50 text-indigo-500' : record.type === '결과' ? 'bg-violet-50 text-violet-500' : 'bg-sky-50 text-sky-500'}`}>
-                                    {record.type}{record.subType ? `(${record.subType})` : ''} {record.period ? ` ${record.period}교시` : ''}
+                                  <span className={`px-2.5 py-1 rounded-xl text-xs font-extrabold flex items-center gap-1 ${displayClass}`}>
+                                    {displayType} {record.period ? ` ${record.period}교시` : ''}
                                   </span>
                                   {isPaper && (<span className="flex items-center gap-1 px-2 py-0.5 bg-emerald-50 border border-emerald-100 text-emerald-600 text-[11px] font-extrabold rounded-md"><Icon name="file-check" size={12} /> 서류 완료</span>)}
                                   {isNeis && (<span className="flex items-center gap-1 px-2 py-0.5 bg-blue-50 border border-blue-100 text-blue-600 text-[11px] font-extrabold rounded-md"><Icon name="monitor" size={12} /> NEIS 결재</span>)}
