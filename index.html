@@ -386,6 +386,12 @@
           const [dmShowMonthEval, setDmShowMonthEval] = useState(false);
           const [isEditingLink, setIsEditingLink] = useState(false);
           const [tempLink, setTempLink] = useState('');
+          
+          // 학사일정 편집 모달 상태
+          const [evDate, setEvDate] = useState('');
+          const [evName, setEvName] = useState('');
+          const [evType, setEvType] = useState('event');
+
           const fileInputRef = useRef(null);
           const backupInputRef = useRef(null);
 
@@ -798,7 +804,7 @@
                   <table className="w-full text-left border-collapse min-w-[900px]">
                     <thead>
                       <tr className="bg-stone-50 border-b border-stone-100 text-stone-500 text-sm">
-                        <th className="p-4 w-12 text-center font-bold">번호</th><th className="p-4 font-bold">이름</th><th className="p-4 w-16 text-center text-rose-500 font-bold">결석</th><th className="p-4 w-16 text-center text-amber-500 font-bold">조퇴</th><th className="p-4 w-16 text-center text-indigo-500 font-bold">지각</th><th className="p-4 w-16 text-center text-violet-500 font-bold">결과</th><th className="p-4 w-16 text-center text-pink-500 font-bold">생출</th><th className="p-4 w-16 text-center text-teal-500 font-bold">인정</th><th className="p-4 w-20 text-center text-blue-500 font-bold">교외체험</th><th className="p-4 w-20 text-center font-bold">관리</th>
+                        <th className="p-4 w-12 text-center font-bold">번호</th><th className="p-4 font-bold">이름</th><th className="p-4 w-16 text-center text-rose-500 font-bold">결석</th><th className="p-4 w-16 text-center text-amber-500 font-bold">조퇴</th><th className="p-4 w-16 text-center text-indigo-500 font-bold">지각</th><th className="p-4 w-16 text-center text-violet-500 font-bold">결과</th><th className="p-2 w-20 text-center text-pink-500 font-bold leading-tight">생출<br/><span className="text-[11px] font-medium tracking-tighter opacity-80">(생리출결)</span></th><th className="p-2 w-24 text-center text-teal-500 font-bold leading-tight whitespace-nowrap">인정<br/><span className="text-[11px] font-medium tracking-tighter opacity-80">(감염병,경조사)</span></th><th className="p-4 w-24 text-center text-blue-500 font-bold whitespace-nowrap">교외체험</th><th className="p-4 w-20 text-center font-bold">관리</th>
                       </tr>
                     </thead>
                     <tbody>
